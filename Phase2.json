@@ -1,0 +1,156 @@
+{
+  "name": "Telegram Bot - Phase 2",
+  "active": true,
+  "nodes": [
+    {
+      "id": "tg-trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [-240, 0],
+      "parameters": { "updates": ["message"] },
+      "credentials": { "telegramApi": { "id": "dfteQ0FMpq4gKjEK", "name": "Telegram account" } }
+    },
+    {
+      "id": "router",
+      "name": "Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [0, 0],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 3 },
+                "conditions": [{ "id": "r1", "leftValue": "={{ $json.message.text }}", "rightValue": "/week", "operator": { "type": "string", "operation": "startsWith" } }],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 3 },
+                "conditions": [{ "id": "r2", "leftValue": "={{ $json.message.text }}", "rightValue": "/next", "operator": { "type": "string", "operation": "startsWith" } }],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "week-dates",
+      "name": "Get Week Range",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, -160],
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst start = new Date(now);\nstart.setHours(0,0,0,0);\nconst end = new Date(start);\nend.setDate(end.getDate() + (7 - now.getDay()));\nend.setHours(23,59,59,999);\nreturn [{ json: { startISO: start.toISOString(), endISO: end.toISOString() } }];"
+      }
+    },
+    {
+      "id": "week-query",
+      "name": "Query Week Tasks",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [480, -160],
+      "parameters": {
+        "operation": "search",
+        "base": { "__rl": true, "value": "appOu4riBfQViqD1Q", "mode": "list", "cachedResultName": "UniMail Storage" },
+        "table": { "__rl": true, "value": "tblP3n7KJBwT4EjoW", "mode": "list", "cachedResultName": "Tasks" },
+        "filterByFormula": "=AND(IS_AFTER({Deadline}, '{{ $json.startISO }}'), IS_BEFORE({Deadline}, '{{ $json.endISO }}'), {Status} = FALSE())",
+        "sort": [{ "field": "Deadline", "direction": "asc" }],
+        "options": {}
+      },
+      "credentials": { "airtableTokenApi": { "id": "o9MjnNnYdJTTENTz", "name": "Airtable Personal Access Token account" } }
+    },
+    {
+      "id": "week-format",
+      "name": "Format Week Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, -160],
+      "parameters": {
+        "jsCode": "const records = $input.all();\nif (records.length === 0) return [{ json: { text: '✅ No pending tasks this week\\!' } }];\nconst emoji = { Assignment:'📝', Quiz:'🧪', Project:'🏗️', Notes:'📖', Event:'📅', Misc:'📌' };\nconst lines = records.map(r => {\n  const f = r.json.fields;\n  const d = new Date(f.Deadline).toLocaleString('en-GB', { weekday:'short', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });\n  return `${emoji[f.Category]||'📌'} *${f['Course Name']}* — ${f['Event Details']}\\n⏰ ${d}`;\n});\nreturn [{ json: { text: `*📅 Your tasks this week:*\\n\\n${lines.join('\\n\\n')}` } }];"
+      }
+    },
+    {
+      "id": "next-time",
+      "name": "Get Current Time",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 160],
+      "parameters": { "jsCode": "return [{ json: { nowISO: new Date().toISOString() } }];" }
+    },
+    {
+      "id": "next-query",
+      "name": "Query Next Deadline",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [480, 160],
+      "parameters": {
+        "operation": "search",
+        "base": { "__rl": true, "value": "appOu4riBfQViqD1Q", "mode": "list", "cachedResultName": "UniMail Storage" },
+        "table": { "__rl": true, "value": "tblP3n7KJBwT4EjoW", "mode": "list", "cachedResultName": "Tasks" },
+        "filterByFormula": "=AND(IS_AFTER({Deadline}, '{{ $json.nowISO }}'), {Status} = FALSE())",
+        "sort": [{ "field": "Deadline", "direction": "asc" }],
+        "maxRecords": 1,
+        "options": {}
+      },
+      "credentials": { "airtableTokenApi": { "id": "o9MjnNnYdJTTENTz", "name": "Airtable Personal Access Token account" } }
+    },
+    {
+      "id": "next-format",
+      "name": "Format Next Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 160],
+      "parameters": {
+        "jsCode": "const records = $input.all();\nif (records.length === 0) return [{ json: { text: '🎉 No upcoming deadlines\\. You are all clear\\!' } }];\nconst f = records[0].json.fields;\nconst deadline = new Date(f.Deadline);\nconst now = new Date();\nconst diffH = Math.floor((deadline - now) / 3600000);\nconst days = Math.floor(diffH / 24);\nconst hrs = diffH % 24;\nconst timeLeft = days > 0 ? `${days}d ${hrs}h remaining` : `⚠️ Only ${diffH}h remaining`;\nconst ds = deadline.toLocaleString('en-GB', { weekday:'long', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });\nreturn [{ json: { text: `🎯 *Next Deadline*\\n\\n📚 *${f['Course Name']}*\\n📋 ${f['Event Details']}\\n⏰ ${ds}\\n⏳ ${timeLeft}\\n\\n📌 *Action:* ${f['Action Required']}` } }];"
+      }
+    },
+    {
+      "id": "send-week",
+      "name": "Send Week Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [960, -160],
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": { "parse_mode": "MarkdownV2" }
+      },
+      "credentials": { "telegramApi": { "id": "dfteQ0FMpq4gKjEK", "name": "Telegram account" } }
+    },
+    {
+      "id": "send-next",
+      "name": "Send Next Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [960, 160],
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": { "parse_mode": "MarkdownV2" }
+      },
+      "credentials": { "telegramApi": { "id": "dfteQ0FMpq4gKjEK", "name": "Telegram account" } }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": { "main": [[{ "node": "Router", "type": "main", "index": 0 }]] },
+    "Router": {
+      "main": [
+        [{ "node": "Get Week Range", "type": "main", "index": 0 }],
+        [{ "node": "Get Current Time", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Week Range": { "main": [[{ "node": "Query Week Tasks", "type": "main", "index": 0 }]] },
+    "Query Week Tasks": { "main": [[{ "node": "Format Week Message", "type": "main", "index": 0 }]] },
+    "Format Week Message": { "main": [[{ "node": "Send Week Message", "type": "main", "index": 0 }]] },
+    "Get Current Time": { "main": [[{ "node": "Query Next Deadline", "type": "main", "index": 0 }]] },
+    "Query Next Deadline": { "main": [[{ "node": "Format Next Message", "type": "main", "index": 0 }]] },
+    "Format Next Message": { "main": [[{ "node": "Send Next Message", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
